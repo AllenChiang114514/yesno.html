@@ -2,10 +2,12 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>點頭搖頭回答是非題 - 穩定版</title>
+    <title>點頭搖頭回答是非題 - 終極穩定版</title>
 
+    <!-- 線上版 TensorFlow.js -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
 
+    <!-- 線上版 Teachable Machine Image -->
     <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
 
     <style>
@@ -118,7 +120,8 @@
         <div class="result" id="speech-result"></div>
         <div id="score">目前得分：0</div>
         
-        <div id="label-container" style="font-size: 12px; color: #999; margin-top: 10px;"></div>
+        <!-- 顯示辨識數據，幫助確認有沒有抓到動作 -->
+        <div id="label-container" style="font-size: 14px; color: #666; margin-top: 10px; font-weight: bold;"></div>
     </div>
 
     <script>
@@ -154,7 +157,7 @@
             labelContainer = document.getElementById("label-container");
             for (let i = 0; i < maxPredictions; i++) labelContainer.appendChild(document.createElement("div"));
 
-            // 暖機
+            // 暖機 (Warm-up)
             await model.predict(webcam.canvas); 
 
             document.getElementById("question").innerText = "準備好了！請點擊下方的「開始挑戰」";
@@ -178,13 +181,13 @@
             document.getElementById("question").innerText = `第 ${currentQuestion + 1} 題：${questions[currentQuestion].q}`;
             speak(questions[currentQuestion].q);
 
-            // 緩衝倒數 3 秒，讓使用者看題並準備
+            // 緩衝倒數 3 秒，讓使用者聽題並準備
             for (let i = 3; i > 0; i--) {
                 document.getElementById("speech-result").innerHTML = `<span id="timer-text">⏳ 準備作答... ${i}</span>`;
                 await new Promise(r => setTimeout(r, 1000));
             }
 
-            document.getElementById("speech-result").innerText = "🔥 請作答！";
+            document.getElementById("speech-result").innerText = "🔥 請作答！(點頭/搖頭)";
             updateStatus(true);
             isBuffering = false; 
         }
@@ -196,6 +199,7 @@
         }
 
         async function predict() {
+            // 如果已經答過這題，或還在倒數緩衝中，就不做判定
             if (answered || isBuffering) return;
 
             const predictions = await model.predict(webcam.canvas);
@@ -205,16 +209,33 @@
             for (let i = 0; i < maxPredictions; i++) {
                 const prob = predictions[i].probability;
                 labelContainer.childNodes[i].innerHTML = `${predictions[i].className}: ${(prob * 100).toFixed(0)}%`;
-                if (prob > bestProb) { bestProb = prob; bestClass = predictions[i].className; }
+                
+                if (prob > bestProb) { 
+                    bestProb = prob; 
+                    bestClass = predictions[i].className; 
+                }
             }
 
-            // 判定邏輯
-            if (bestProb > 0.92) {
+            // 門檻設定為 80% (0.80)，只要動作有做出來就能輕鬆判定
+            if (bestProb > 0.80) {
                 let userAns = "";
-                if (bestClass === "class1" || bestClass === "Class 1") userAns = "Yes";
-                else if (bestClass === "class2" || bestClass === "Class 2") userAns = "No";
+                
+                // 將抓到的名稱全部轉為小寫並去空白，無敵辨識法
+                let checkName = bestClass.toLowerCase().replace(/\s+/g, '');
 
-                if (userAns !== "") checkAnswer(userAns);
+                // 判斷點頭 (Yes)
+                if (checkName === "class1" || checkName === "yes" || bestClass.includes("點頭")) {
+                    userAns = "Yes";
+                } 
+                // 判斷搖頭 (No)
+                else if (checkName === "class2" || checkName === "no" || bestClass.includes("搖頭")) {
+                    userAns = "No";
+                }
+
+                // 如果有對應到答案，就送出
+                if (userAns !== "") {
+                    checkAnswer(userAns);
+                }
             }
         }
 
@@ -237,6 +258,7 @@
 
             updateScore();
 
+            // 答題後等待 2.5 秒，再切換下一題
             setTimeout(() => {
                 currentQuestion++;
                 if (currentQuestion < questions.length) {
@@ -254,7 +276,7 @@
         function updateStatus(on) {
             const el = document.getElementById("status-display");
             if (on) {
-                el.innerText = "● AI 辨識中";
+                el.innerText = "● AI 辨識中 (可作答)";
                 el.className = "status-badge status-on";
             } else {
                 el.innerText = "○ 暫停辨識";
@@ -262,7 +284,9 @@
             }
         }
 
-        function updateScore() { document.getElementById("score").innerText = "目前得分：" + score; }
+        function updateScore() { 
+            document.getElementById("score").innerText = "目前得分：" + score; 
+        }
 
         function speak(text) {
             speechSynthesis.cancel(); 
