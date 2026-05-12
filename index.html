@@ -35,7 +35,7 @@
             margin-top: 20px;
             color: darkgreen;
             font-weight: bold;
-            height: 40px; /* 固定高度避免文字跳動 */
+            height: 40px;
         }
 
         button {
@@ -43,6 +43,11 @@
             padding: 10px 20px;
             margin: 10px;
             cursor: pointer;
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
         }
 
         #score {
@@ -55,16 +60,20 @@
         .timer {
             color: #ff8c00;
         }
+        
+        .loading {
+            color: #666;
+        }
     </style>
 </head>
 
 <body>
     <h1>🙆 點頭 / 🙅 搖頭 是非題</h1>
 
-    <button onclick="init()">啟動鏡頭</button>
+    <button id="start-btn" onclick="init()">啟動鏡頭</button>
     <button onclick="nextQuestion()">跳過/下一題</button>
 
-    <div class="question" id="question">請先啟動鏡頭</div>
+    <div class="question" id="question">請先點擊啟動鏡頭</div>
 
     <div id="webcam-container"></div>
     <div id="label-container"></div>
@@ -73,7 +82,6 @@
     <div id="score">得分：0</div>
 
     <script>
-        // 你的專屬模型網址
         const URL = "https://teachablemachine.withgoogle.com/models/lbUjxSw14/";
 
         let model, webcam, labelContainer, maxPredictions;
@@ -81,9 +89,8 @@
         let score = 0;
         let currentQuestion = 0;
         let answered = false;
-        let isBuffering = false; // 新增：用來判斷是否在緩衝時間內
+        let isBuffering = false; 
 
-        // 題目資料
         const questions = [
             { q: "1 + 1 = 2 ?", answer: "Yes" },
             { q: "貓會飛 ?", answer: "No" },
@@ -93,13 +100,19 @@
         ];
 
         async function init() {
+            // 1. 介面切換到「載入中」狀態，並鎖定按鈕避免重複點擊
+            const startBtn = document.getElementById("start-btn");
+            startBtn.disabled = true;
+            document.getElementById("question").innerText = "模型載入與暖機中...";
+            document.getElementById("speech-result").innerHTML = "<span class='loading'>⚙️ 正在啟動 AI 引擎，請稍候約 3~5 秒...</span>";
+
             const modelURL = URL + "model.json";
             const metadataURL = URL + "metadata.json";
 
             model = await tmImage.load(modelURL, metadataURL);
             maxPredictions = model.getTotalClasses();
 
-            webcam = new tmImage.Webcam(320, 240, true); // true 表示鏡像顯示
+            webcam = new tmImage.Webcam(320, 240, true); 
             await webcam.setup();
             await webcam.play();
             window.requestAnimationFrame(loop);
@@ -113,29 +126,31 @@
                 labelContainer.appendChild(document.createElement("div"));
             }
 
+            // ★★★ 核心解法：偷偷預測一次來「暖機 (Warm-up)」★★★
+            // 讓這段最卡頓的運算在背景先跑完，第一題就不會卡了
+            await model.predict(webcam.canvas); 
+
+            // 2. 暖機完成，解鎖按鈕並進入第一題
+            startBtn.disabled = false;
             currentQuestion = 0;
             score = 0;
             updateScore();
             showQuestion();
         }
 
-        // 修改為非同步函數，以支援倒數計時功能
         async function showQuestion() {
             answered = false;
-            isBuffering = true; // 開啟緩衝狀態，暫停接收答案
-            lastAnswer = "";    // 清空上次的答案紀錄
+            isBuffering = true; 
+            lastAnswer = "";    
             
-            // 顯示題目並語音唸出
             document.getElementById("question").innerText = questions[currentQuestion].q;
             speak(questions[currentQuestion].q);
 
-            // 執行 3 秒倒數計時
             for (let i = 3; i > 0; i--) {
                 document.getElementById("speech-result").innerHTML = `<span class="timer">⏳ 請準備... ${i} 秒</span>`;
                 await new Promise(resolve => setTimeout(resolve, 1000));
             }
 
-            // 倒數結束，開放作答
             document.getElementById("speech-result").innerText = "👉 請作答！(點頭/搖頭)";
             isBuffering = false; 
         }
@@ -147,7 +162,7 @@
                     "🎉 測驗結束！總分：" + score + " / " + questions.length;
                 document.getElementById("speech-result").innerText = "";
                 speak("測驗結束，你得到 " + score + " 分");
-                isBuffering = true; // 結束後鎖定作答
+                isBuffering = true; 
                 return;
             }
             showQuestion();
@@ -160,7 +175,6 @@
         }
 
         async function predict() {
-            // ★★★ 如果已經答過這題，或者「正在倒數緩衝中」，就直接跳過不判定 ★★★
             if (answered || isBuffering) return;
 
             const predictions = await model.predict(webcam.canvas);
@@ -182,7 +196,6 @@
                 }
             }
 
-            // 信心值大於 90% 才判定
             if (bestProb > 0.90 && bestClass !== lastAnswer) {
                 
                 let mappedAnswer = "";
@@ -216,7 +229,6 @@
             updateScore();
             speak(message);
 
-            // 答題後等待 2.5 秒，再進入下一題
             setTimeout(nextQuestion, 2500);
         }
 
