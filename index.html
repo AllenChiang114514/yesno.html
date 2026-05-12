@@ -2,45 +2,95 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>點頭搖頭控制 (Yes/No)</title>
+    <title>點頭搖頭回答是非題</title>
 
-    <!-- 改為線上版 TensorFlow.js -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
 
-    <!-- 改為線上版 Teachable Machine Image -->
     <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
 
     <style>
         body {
             font-family: Arial, sans-serif;
             text-align: center;
+            background: #f7f7f7;
         }
+
+        h1 {
+            color: #333;
+        }
+
         #webcam-container {
             margin-top: 20px;
         }
-        .result {
-            font-size: 22px;
-            margin-top: 15px;
-            color: darkblue;
+
+        .question {
+            font-size: 30px;
             font-weight: bold;
+            margin: 20px;
+            color: #0066cc;
+        }
+
+        .result {
+            font-size: 28px;
+            margin-top: 20px;
+            color: darkgreen;
+            font-weight: bold;
+            height: 40px; /* 固定高度避免文字跳動 */
+        }
+
+        button {
+            font-size: 22px;
+            padding: 10px 20px;
+            margin: 10px;
+            cursor: pointer;
+        }
+
+        #score {
+            font-size: 24px;
+            margin-top: 20px;
+            color: #cc0000;
+            font-weight: bold;
+        }
+        
+        .timer {
+            color: #ff8c00;
         }
     </style>
 </head>
 
 <body>
-    <h2>🤖 點頭搖頭控制 (Teachable Machine)</h2>
+    <h1>🙆 點頭 / 🙅 搖頭 是非題</h1>
+
     <button onclick="init()">啟動鏡頭</button>
+    <button onclick="nextQuestion()">跳過/下一題</button>
+
+    <div class="question" id="question">請先啟動鏡頭</div>
 
     <div id="webcam-container"></div>
     <div id="label-container"></div>
+
     <div class="result" id="speech-result"></div>
+    <div id="score">得分：0</div>
 
     <script>
-        // ★★★ 已經換成你專屬的模型網址 ★★★
+        // 你的專屬模型網址
         const URL = "https://teachablemachine.withgoogle.com/models/lbUjxSw14/";
 
         let model, webcam, labelContainer, maxPredictions;
-        let lastSpoken = ""; // 避免重複播放
+        let lastAnswer = "";
+        let score = 0;
+        let currentQuestion = 0;
+        let answered = false;
+        let isBuffering = false; // 新增：用來判斷是否在緩衝時間內
+
+        // 題目資料
+        const questions = [
+            { q: "1 + 1 = 2 ?", answer: "Yes" },
+            { q: "貓會飛 ?", answer: "No" },
+            { q: "太陽從東邊升起 ?", answer: "Yes" },
+            { q: "魚住在天空 ?", answer: "No" },
+            { q: "台灣在亞洲 ?", answer: "Yes" }
+        ];
 
         async function init() {
             const modelURL = URL + "model.json";
@@ -49,11 +99,12 @@
             model = await tmImage.load(modelURL, metadataURL);
             maxPredictions = model.getTotalClasses();
 
-            webcam = new tmImage.Webcam(320, 240, true); // true 表示鏡像顯示，看起來比較直覺
+            webcam = new tmImage.Webcam(320, 240, true); // true 表示鏡像顯示
             await webcam.setup();
             await webcam.play();
             window.requestAnimationFrame(loop);
 
+            document.getElementById("webcam-container").innerHTML = "";
             document.getElementById("webcam-container").appendChild(webcam.canvas);
 
             labelContainer = document.getElementById("label-container");
@@ -61,6 +112,45 @@
             for (let i = 0; i < maxPredictions; i++) {
                 labelContainer.appendChild(document.createElement("div"));
             }
+
+            currentQuestion = 0;
+            score = 0;
+            updateScore();
+            showQuestion();
+        }
+
+        // 修改為非同步函數，以支援倒數計時功能
+        async function showQuestion() {
+            answered = false;
+            isBuffering = true; // 開啟緩衝狀態，暫停接收答案
+            lastAnswer = "";    // 清空上次的答案紀錄
+            
+            // 顯示題目並語音唸出
+            document.getElementById("question").innerText = questions[currentQuestion].q;
+            speak(questions[currentQuestion].q);
+
+            // 執行 3 秒倒數計時
+            for (let i = 3; i > 0; i--) {
+                document.getElementById("speech-result").innerHTML = `<span class="timer">⏳ 請準備... ${i} 秒</span>`;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+
+            // 倒數結束，開放作答
+            document.getElementById("speech-result").innerText = "👉 請作答！(點頭/搖頭)";
+            isBuffering = false; 
+        }
+
+        function nextQuestion() {
+            currentQuestion++;
+            if (currentQuestion >= questions.length) {
+                document.getElementById("question").innerText =
+                    "🎉 測驗結束！總分：" + score + " / " + questions.length;
+                document.getElementById("speech-result").innerText = "";
+                speak("測驗結束，你得到 " + score + " 分");
+                isBuffering = true; // 結束後鎖定作答
+                return;
+            }
+            showQuestion();
         }
 
         async function loop() {
@@ -70,6 +160,9 @@
         }
 
         async function predict() {
+            // ★★★ 如果已經答過這題，或者「正在倒數緩衝中」，就直接跳過不判定 ★★★
+            if (answered || isBuffering) return;
+
             const predictions = await model.predict(webcam.canvas);
 
             let bestClass = "";
@@ -80,6 +173,7 @@
                 const text =
                     predictions[i].className + " : " +
                     (prob * 100).toFixed(1) + "%";
+
                 labelContainer.childNodes[i].innerHTML = text;
 
                 if (prob > bestProb) {
@@ -88,39 +182,54 @@
                 }
             }
 
-            // 門檻值設定為 0.90（90% 把握才觸發，避免誤判）
-            if (bestProb > 0.90 && bestClass !== lastSpoken) {
-                speakGesture(bestClass);
-                lastSpoken = bestClass;
+            // 信心值大於 90% 才判定
+            if (bestProb > 0.90 && bestClass !== lastAnswer) {
+                
+                let mappedAnswer = "";
+                if (bestClass === "class1" || bestClass === "Class 1") {
+                    mappedAnswer = "Yes";
+                } else if (bestClass === "class2" || bestClass === "Class 2") {
+                    mappedAnswer = "No";
+                }
+
+                if (mappedAnswer !== "") {
+                    checkAnswer(mappedAnswer);
+                    lastAnswer = bestClass; 
+                }
             }
         }
 
-        function speakGesture(gesture) {
+        function checkAnswer(userAnswer) {
+            answered = true;
+
+            const correctAnswer = questions[currentQuestion].answer;
             let message = "";
-            
-            // ★★★ 已經替換為 class1 (yes) 與 class2 (no) ★★★
-            switch (gesture) {
-                case "class1":
-                case "Class 1":
-                    message = "點頭，Yes";
-                    break;
-                case "class2":
-                case "Class 2":
-                    message = "搖頭，No";
-                    break;
-                default:
-                    // 如果有第三個類別（如背景），則不發出聲音
-                    message = "";
-                    return; 
+
+            if (userAnswer === correctAnswer) {
+                score++;
+                message = "✅ 答對了！";
+            } else {
+                message = "❌ 答錯了！";
             }
 
             document.getElementById("speech-result").innerText = message;
+            updateScore();
+            speak(message);
 
-            // 語音播放設定
-            const utterance = new SpeechSynthesisUtterance(message);
-            utterance.lang = "zh-TW";   // 中文語音
-            utterance.rate = 1;         // 語速
-            utterance.pitch = 1;        // 音調
+            // 答題後等待 2.5 秒，再進入下一題
+            setTimeout(nextQuestion, 2500);
+        }
+
+        function updateScore() {
+            document.getElementById("score").innerText = "得分：" + score;
+        }
+
+        function speak(text) {
+            speechSynthesis.cancel(); 
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = "zh-TW";
+            utterance.rate = 1;
+            utterance.pitch = 1;
             speechSynthesis.speak(utterance);
         }
     </script>
