@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>點頭搖頭回答是非題</title>
+    <title>點頭搖頭回答是非題 - 穩定版</title>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
 
@@ -10,86 +10,125 @@
 
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Microsoft JhengHei', Arial, sans-serif;
             text-align: center;
-            background: #f7f7f7;
+            background: #f0f2f5;
+            padding-bottom: 50px;
         }
 
-        h1 {
-            color: #333;
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
         }
 
         #webcam-container {
             margin-top: 20px;
+            border: 5px solid #ddd;
+            border-radius: 10px;
+            overflow: hidden;
+            display: inline-block;
+            background: #000;
         }
 
-        .question {
-            font-size: 30px;
-            font-weight: bold;
-            margin: 20px;
-            color: #0066cc;
+        .question-box {
+            background: #e7f3ff;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            min-height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
+
+        #question {
+            font-size: 28px;
+            font-weight: bold;
+            color: #0056b3;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 18px;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+
+        .status-off { background: #ffcccc; color: #cc0000; }
+        .status-on { background: #ccffcc; color: #008800; }
 
         .result {
-            font-size: 28px;
-            margin-top: 20px;
-            color: darkgreen;
+            font-size: 32px;
+            margin-top: 15px;
             font-weight: bold;
-            height: 40px;
+            height: 50px;
         }
 
         button {
-            font-size: 22px;
-            padding: 10px 20px;
+            font-size: 20px;
+            padding: 12px 25px;
             margin: 10px;
             cursor: pointer;
+            border: none;
+            border-radius: 8px;
+            background-color: #007bff;
+            color: white;
+            transition: 0.3s;
         }
 
-        button:disabled {
-            background-color: #ccc;
-            cursor: not-allowed;
-        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
 
         #score {
             font-size: 24px;
-            margin-top: 20px;
-            color: #cc0000;
+            color: #d9534f;
             font-weight: bold;
+            margin-top: 10px;
         }
         
-        .timer {
-            color: #ff8c00;
-        }
-        
-        .loading {
-            color: #666;
-        }
+        #timer-text { color: #f0ad4e; font-size: 28px; }
     </style>
 </head>
 
 <body>
-    <h1>🙆 點頭 / 🙅 搖頭 是非題</h1>
+    <h1>🧠 是非題挑戰：點頭或搖頭</h1>
 
-    <button id="start-btn" onclick="init()">啟動鏡頭</button>
-    <button onclick="nextQuestion()">跳過/下一題</button>
+    <div class="container">
+        <div id="setup-area">
+            <button id="init-btn" onclick="init()">第一步：啟動鏡頭與暖機</button>
+            <button id="start-btn" onclick="startQuiz()" style="display:none; background-color: #28a745;">第二步：開始挑戰！</button>
+        </div>
 
-    <div class="question" id="question">請先點擊啟動鏡頭</div>
+        <div class="question-box">
+            <div id="question">請先啟動鏡頭</div>
+        </div>
 
-    <div id="webcam-container"></div>
-    <div id="label-container"></div>
+        <div>
+            <span id="status-display" class="status-badge status-off">AI 尚未啟動</span>
+        </div>
 
-    <div class="result" id="speech-result"></div>
-    <div id="score">得分：0</div>
+        <div id="webcam-container"></div>
+        
+        <div class="result" id="speech-result"></div>
+        <div id="score">目前得分：0</div>
+        
+        <div id="label-container" style="font-size: 12px; color: #999; margin-top: 10px;"></div>
+    </div>
 
     <script>
         const URL = "https://teachablemachine.withgoogle.com/models/lbUjxSw14/";
 
         let model, webcam, labelContainer, maxPredictions;
-        let lastAnswer = "";
         let score = 0;
         let currentQuestion = 0;
         let answered = false;
-        let isBuffering = false; 
+        let isBuffering = true; 
 
         const questions = [
             { q: "1 + 1 = 2 ?", answer: "Yes" },
@@ -100,16 +139,10 @@
         ];
 
         async function init() {
-            // 1. 介面切換到「載入中」狀態，並鎖定按鈕避免重複點擊
-            const startBtn = document.getElementById("start-btn");
-            startBtn.disabled = true;
-            document.getElementById("question").innerText = "模型載入與暖機中...";
-            document.getElementById("speech-result").innerHTML = "<span class='loading'>⚙️ 正在啟動 AI 引擎，請稍候約 3~5 秒...</span>";
-
-            const modelURL = URL + "model.json";
-            const metadataURL = URL + "metadata.json";
-
-            model = await tmImage.load(modelURL, metadataURL);
+            document.getElementById("init-btn").disabled = true;
+            document.getElementById("question").innerText = "模型載入中，請稍候...";
+            
+            model = await tmImage.load(URL + "model.json", URL + "metadata.json");
             maxPredictions = model.getTotalClasses();
 
             webcam = new tmImage.Webcam(320, 240, true); 
@@ -117,21 +150,20 @@
             await webcam.play();
             window.requestAnimationFrame(loop);
 
-            document.getElementById("webcam-container").innerHTML = "";
             document.getElementById("webcam-container").appendChild(webcam.canvas);
-
             labelContainer = document.getElementById("label-container");
-            labelContainer.innerHTML = "";
-            for (let i = 0; i < maxPredictions; i++) {
-                labelContainer.appendChild(document.createElement("div"));
-            }
+            for (let i = 0; i < maxPredictions; i++) labelContainer.appendChild(document.createElement("div"));
 
-            // ★★★ 核心解法：偷偷預測一次來「暖機 (Warm-up)」★★★
-            // 讓這段最卡頓的運算在背景先跑完，第一題就不會卡了
+            // 暖機
             await model.predict(webcam.canvas); 
 
-            // 2. 暖機完成，解鎖按鈕並進入第一題
-            startBtn.disabled = false;
+            document.getElementById("question").innerText = "準備好了！請點擊下方的「開始挑戰」";
+            document.getElementById("init-btn").style.display = "none";
+            document.getElementById("start-btn").style.display = "inline-block";
+        }
+
+        function startQuiz() {
+            document.getElementById("start-btn").style.display = "none";
             currentQuestion = 0;
             score = 0;
             updateScore();
@@ -141,31 +173,20 @@
         async function showQuestion() {
             answered = false;
             isBuffering = true; 
-            lastAnswer = "";    
+            updateStatus(false);
             
-            document.getElementById("question").innerText = questions[currentQuestion].q;
+            document.getElementById("question").innerText = `第 ${currentQuestion + 1} 題：${questions[currentQuestion].q}`;
             speak(questions[currentQuestion].q);
 
+            // 緩衝倒數 3 秒，讓使用者看題並準備
             for (let i = 3; i > 0; i--) {
-                document.getElementById("speech-result").innerHTML = `<span class="timer">⏳ 請準備... ${i} 秒</span>`;
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                document.getElementById("speech-result").innerHTML = `<span id="timer-text">⏳ 準備作答... ${i}</span>`;
+                await new Promise(r => setTimeout(r, 1000));
             }
 
-            document.getElementById("speech-result").innerText = "👉 請作答！(點頭/搖頭)";
+            document.getElementById("speech-result").innerText = "🔥 請作答！";
+            updateStatus(true);
             isBuffering = false; 
-        }
-
-        function nextQuestion() {
-            currentQuestion++;
-            if (currentQuestion >= questions.length) {
-                document.getElementById("question").innerText =
-                    "🎉 測驗結束！總分：" + score + " / " + questions.length;
-                document.getElementById("speech-result").innerText = "";
-                speak("測驗結束，你得到 " + score + " 分");
-                isBuffering = true; 
-                return;
-            }
-            showQuestion();
         }
 
         async function loop() {
@@ -178,71 +199,76 @@
             if (answered || isBuffering) return;
 
             const predictions = await model.predict(webcam.canvas);
-
             let bestClass = "";
             let bestProb = 0;
 
             for (let i = 0; i < maxPredictions; i++) {
                 const prob = predictions[i].probability;
-                const text =
-                    predictions[i].className + " : " +
-                    (prob * 100).toFixed(1) + "%";
-
-                labelContainer.childNodes[i].innerHTML = text;
-
-                if (prob > bestProb) {
-                    bestProb = prob;
-                    bestClass = predictions[i].className;
-                }
+                labelContainer.childNodes[i].innerHTML = `${predictions[i].className}: ${(prob * 100).toFixed(0)}%`;
+                if (prob > bestProb) { bestProb = prob; bestClass = predictions[i].className; }
             }
 
-            if (bestProb > 0.90 && bestClass !== lastAnswer) {
-                
-                let mappedAnswer = "";
-                if (bestClass === "class1" || bestClass === "Class 1") {
-                    mappedAnswer = "Yes";
-                } else if (bestClass === "class2" || bestClass === "Class 2") {
-                    mappedAnswer = "No";
-                }
+            // 判定邏輯
+            if (bestProb > 0.92) {
+                let userAns = "";
+                if (bestClass === "class1" || bestClass === "Class 1") userAns = "Yes";
+                else if (bestClass === "class2" || bestClass === "Class 2") userAns = "No";
 
-                if (mappedAnswer !== "") {
-                    checkAnswer(mappedAnswer);
-                    lastAnswer = bestClass; 
-                }
+                if (userAns !== "") checkAnswer(userAns);
             }
         }
 
         function checkAnswer(userAnswer) {
             answered = true;
+            isBuffering = true;
+            updateStatus(false);
 
-            const correctAnswer = questions[currentQuestion].answer;
-            let message = "";
-
-            if (userAnswer === correctAnswer) {
+            const correct = questions[currentQuestion].answer;
+            const isCorrect = (userAnswer === correct);
+            
+            if (isCorrect) {
                 score++;
-                message = "✅ 答對了！";
+                document.getElementById("speech-result").innerHTML = "<span style='color:green'>✅ 太棒了！答對了</span>";
+                speak("答對了");
             } else {
-                message = "❌ 答錯了！";
+                document.getElementById("speech-result").innerHTML = "<span style='color:red'>❌ 可惜答錯了</span>";
+                speak("答錯了");
             }
 
-            document.getElementById("speech-result").innerText = message;
             updateScore();
-            speak(message);
 
-            setTimeout(nextQuestion, 2500);
+            setTimeout(() => {
+                currentQuestion++;
+                if (currentQuestion < questions.length) {
+                    showQuestion();
+                } else {
+                    document.getElementById("question").innerText = "🎊 挑戰完成！";
+                    document.getElementById("speech-result").innerText = `總得分：${score} / ${questions.length}`;
+                    speak(`測驗結束，你得到 ${score} 分`);
+                    document.getElementById("start-btn").innerText = "再玩一次";
+                    document.getElementById("start-btn").style.display = "inline-block";
+                }
+            }, 2500);
         }
 
-        function updateScore() {
-            document.getElementById("score").innerText = "得分：" + score;
+        function updateStatus(on) {
+            const el = document.getElementById("status-display");
+            if (on) {
+                el.innerText = "● AI 辨識中";
+                el.className = "status-badge status-on";
+            } else {
+                el.innerText = "○ 暫停辨識";
+                el.className = "status-badge status-off";
+            }
         }
+
+        function updateScore() { document.getElementById("score").innerText = "目前得分：" + score; }
 
         function speak(text) {
             speechSynthesis.cancel(); 
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = "zh-TW";
-            utterance.rate = 1;
-            utterance.pitch = 1;
-            speechSynthesis.speak(utterance);
+            const u = new SpeechSynthesisUtterance(text);
+            u.lang = "zh-TW";
+            speechSynthesis.speak(u);
         }
     </script>
 </body>
